@@ -207,7 +207,9 @@ describe('fetchWorkday', () => {
     assert.equal(pm.metadata.workdayTenant, 'cisco');
     assert.equal(pm.metadata.workdaySite, 'Cisco_Careers');
     assert.equal(pm.metadata.externalPath, '/job/USA/Staff-PM_R123');
-    assert.equal(pm.postedAt, '2026-05-01T00:00:00.000Z');
+    assert.equal(pm.postedAt, null);
+    assert.equal(pm.metadata.publicationDateRaw, '2026-05-01');
+    assert.equal(pm.metadata.publicationDateBasis, 'calendar_or_relative_unverified');
   });
 
   test('job ids are unchanged (location still feeds the id, locations does not)', async (t) => {

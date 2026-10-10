@@ -1,6 +1,7 @@
 import { normalize, decodeEntities, periodWord } from '../normalizer.js';
 import { atsErrorFromStatus } from '../errors.js';
 import { atsFetch, probeResult } from '../http.js';
+import { awarePublicationInstant } from '../publication.js';
 
 const BASE_URL = 'https://boards-api.greenhouse.io/v1/boards';
 
@@ -39,6 +40,7 @@ export async function fetchGreenhouse(slug, ctx = {}) {
 
   return jobs.map(job => {
     const payRanges = parsePayRanges(job.pay_input_ranges);
+    const published = awarePublicationInstant(job.first_published);
     return normalize({
       companySlug: slug,
       company: data.name || slug,
@@ -50,9 +52,8 @@ export async function fetchGreenhouse(slug, ctx = {}) {
       // once so normalize() sees real tags; it strips and decodes the rest.
       description: decodeEntities(job.content || ''),
       url: job.absolute_url || '',
-      // updated_at is an edit time that many boards bulk-refresh, so it is not
-      // a posting date. first_published is. Fallback covers boards without it (#69).
-      postedAt: job.first_published || job.updated_at || null,
+      // An edit is not publication. Missing original publication stays unknown.
+      postedAt: published ? job.first_published : null,
       salary: salaryFromRanges(payRanges), // null without structured pay; normalize() then parses the text
       metadata: {
         greenhouseId: job.id,
@@ -60,6 +61,8 @@ export async function fetchGreenhouse(slug, ctx = {}) {
         departments: job.departments?.map(d => d.name) || [],
         offices: job.offices?.map(o => o.name) || [],
         updatedAt: job.updated_at,
+        firstPublishedRaw: job.first_published || null,
+        publicationDateBasis: published ? 'source_first_published' : 'original_unavailable',
         payRanges,
       },
     }, 'greenhouse');

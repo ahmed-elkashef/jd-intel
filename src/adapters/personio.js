@@ -1,6 +1,7 @@
-import { normalize, decodeEntities, toIso } from '../normalizer.js';
+import { normalize, decodeEntities, stripHtml } from '../normalizer.js';
 import { atsErrorFromStatus } from '../errors.js';
 import { atsFetch } from '../http.js';
+import { awarePublicationInstant } from '../publication.js';
 
 /**
  * Fetch jobs from a Personio career site via its public XML feed.
@@ -41,6 +42,9 @@ export async function fetchPersonio(slug, ctx = {}) {
     // <name> of its own.
     const position = raw.replace(/<jobDescriptions>[\s\S]*<\/jobDescriptions>/, '');
     const id = pick(position, 'id');
+    const createdAt = pick(position, 'createdAt');
+    const published = awarePublicationInstant(createdAt);
+    const description = buildDescription(raw);
     // The primary <office>, then any under <additionalOffices>.
     const offices = [...position.matchAll(/<office>([\s\S]*?)<\/office>/g)].map(m => decodeEntities(m[1].trim()));
 
@@ -54,9 +58,10 @@ export async function fetchPersonio(slug, ctx = {}) {
       location: offices[0] || '',
       locations: offices,
       workplace: null, // The feed has no remote/hybrid field; the location string decides.
-      description: buildDescription(raw),
+      description,
+      content: description ? undefined : { status: 'missing', reason: 'source_empty_description' },
       url: id ? `https://${slug}.jobs.personio.de/job/${id}` : '',
-      postedAt: toIso(pick(position, 'createdAt')),
+      postedAt: published,
       salary: null, // No structured salary; normalizer parses from text
       metadata: {
         personioId: id,
@@ -66,6 +71,8 @@ export async function fetchPersonio(slug, ctx = {}) {
         seniority: pick(position, 'seniority'),
         schedule: pick(position, 'schedule'),
         yearsOfExperience: pick(position, 'yearsOfExperience'),
+        createdAtRaw: createdAt || null,
+        publicationDateBasis: published ? 'source_createdAt_aware' : 'original_unavailable',
       },
     }, 'personio');
   });
@@ -76,7 +83,9 @@ export async function fetchPersonio(slug, ctx = {}) {
  * or a 404). atsFetch throws the 429, 5xx and network cases itself.
  */
 async function requestFeed(slug) {
-  const resp = await atsFetch(`https://${slug}.jobs.personio.de/xml?language=en`, { redirect: 'manual' });
+  // Forcing English can return the positions but silently omit every section
+  // on a board that only publishes another language. Keep the board's default.
+  const resp = await atsFetch(`https://${slug}.jobs.personio.de/xml`, { redirect: 'manual' });
   if (resp.ok) return resp;
   if (resp.status === 404 || (resp.status >= 300 && resp.status < 400)) return null;
   throw atsErrorFromStatus(resp.status, `Personio feed error for ${slug}: ${resp.status}`);
@@ -92,6 +101,7 @@ function buildDescription(position) {
   return [...position.matchAll(/<jobDescription>([\s\S]*?)<\/jobDescription>/g)].map(([, section]) => {
     const heading = section.match(/<name>([\s\S]*?)<\/name>/)?.[1].trim() || '';
     const value = (section.match(/<value>([\s\S]*?)<\/value>/)?.[1] || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim();
+    if (!stripHtml(value)) return ''; // A heading without its body is not a brief.
     return (heading ? `<h3>${heading}</h3>` : '') + value;
   }).filter(Boolean).join('\n');
 }

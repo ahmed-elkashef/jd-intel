@@ -1,7 +1,7 @@
 {
   "name": "jd-intel-mcp",
-  "version": "0.13.0",
-  "mcpName": "io.github.prPMDev/jd-intel-mcp",
+  "version": "0.13.1-source-safety",
+  "mcpName": "io.github.ahmed-elkashef/jd-intel-mcp",
   "description": "MCP server for jd-intel. Your AI assistant fetches and reads full job descriptions across nine ATS platforms, no copy-paste.",
   "type": "module",
   "main": "server.js",
@@ -28,8 +28,8 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "jd-intel": "^0.12.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "jd-intel": "file:..",
     "zod": "^3.23.0"
   },
   "keywords": [
@@ -58,13 +58,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/prPMDev/jd-intel.git",
+    "url": "git+https://github.com/ahmed-elkashef/jd-intel.git",
     "directory": "mcp"
   },
   "bugs": {
-    "url": "https://github.com/prPMDev/jd-intel/issues"
+    "url": "https://github.com/ahmed-elkashef/jd-intel/issues"
   },
-  "homepage": "https://github.com/prPMDev/jd-intel#readme",
+  "homepage": "https://github.com/ahmed-elkashef/jd-intel#readme",
   "engines": {
     "node": ">=18"
   }

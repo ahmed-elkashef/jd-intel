@@ -17,7 +17,7 @@ import { disableRetries, isAtsError, probeFailureTests } from './helpers.js';
  * FIXTURE is trimmed from a real /jobs?content=true response (2026-09-27).
  * Top-level keys are `jobs` and `meta` only; there is no `name`. Greenhouse
  * returns `content` HTML-entity-encoded, and the fixture keeps it that way.
- * The second job has `first_published` removed to cover the fallback.
+ * The second job has `first_published` removed to cover an unresolved original.
  */
 
 disableRetries();
@@ -158,10 +158,12 @@ describe('fetchGreenhouse', () => {
     assert.notEqual(job.postedAt, job.metadata.updatedAt);
   });
 
-  test('postedAt falls back to updated_at when first_published is missing', async (t) => {
+  test('missing first_published stays unresolved, with updated_at separate', async (t) => {
     mockFetch(t);
     const [, job] = await fetchGreenhouse('vercel');
-    assert.equal(job.postedAt, '2026-09-24T13:19:48-04:00');
+    assert.equal(job.postedAt, null);
+    assert.equal(job.metadata.updatedAt, '2026-09-24T13:19:48-04:00');
+    assert.equal(job.metadata.publicationDateBasis, 'original_unavailable');
   });
 
   test('metadata.updatedAt carries the raw updated_at', async (t) => {

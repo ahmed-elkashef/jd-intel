@@ -77,7 +77,7 @@ describe('fetchPersonio', () => {
   test('requests the XML feed without following redirects', async (t) => {
     const calls = mockFetch(t);
     await fetchPersonio('testco');
-    assert.deepEqual(calls, [{ url: 'https://testco.jobs.personio.de/xml?language=en', redirect: 'manual' }]);
+    assert.deepEqual(calls, [{ url: 'https://testco.jobs.personio.de/xml', redirect: 'manual' }]);
   });
 
   test('normalizes a position: decoded fields, every office, sections as headings, pay from the text', async (t) => {

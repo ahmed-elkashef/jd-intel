@@ -1,6 +1,6 @@
 {
   "name": "jd-intel",
-  "version": "0.12.0",
+  "version": "0.12.1-source-safety",
   "description": "Fetch and normalize job descriptions across nine major ATS (Greenhouse, Lever, Ashby, Workday, and more), for your AI assistant. No copy-paste.",
   "type": "module",
   "main": "src/index.js",
@@ -47,12 +47,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/prPMDev/jd-intel.git"
+    "url": "git+https://github.com/ahmed-elkashef/jd-intel.git"
   },
   "bugs": {
-    "url": "https://github.com/prPMDev/jd-intel/issues"
+    "url": "https://github.com/ahmed-elkashef/jd-intel/issues"
   },
-  "homepage": "https://github.com/prPMDev/jd-intel#readme",
+  "homepage": "https://github.com/ahmed-elkashef/jd-intel#readme",
   "engines": {
     "node": ">=18"
   }

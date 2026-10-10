@@ -1,5 +1,11 @@
 # jd-intel-mcp
 
+## Source safety fork
+
+This is a public MIT fork of [Prashant R’s jd-intel](https://github.com/prPMDev/jd-intel), based on upstream commit `c37a6edeb1140d2418e07928dedd6537bc4bf12d`. Original authorship and license are preserved. See [FORK.md](../FORK.md) for the changes, limits and local MCP setup.
+
+Install this fork from its checkout. The upstream npm packages and upstream MCPB links in the documentation below do not include this fork’s changes. This fork has no separate npm or MCP Registry publication.
+
 MCP server for [jd-intel](https://github.com/prPMDev/jd-intel). Lets any AI assistant (Claude Desktop, Claude Code, Cursor, Windsurf, VS Code) search open job listings across Greenhouse, Lever, Ashby, SmartRecruiters, Teamtailor, Recruitee, Personio, Workable, and Workday through natural conversation.
 
 > **Stop pasting job descriptions into AI assistants. Let your AI fetch them directly.**

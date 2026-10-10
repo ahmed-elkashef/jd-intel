@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   publish:
+    # The fork is released on GitHub; it must not publish under upstream npm names.
+    if: github.repository == 'prPMDev/jd-intel'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

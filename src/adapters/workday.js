@@ -1,8 +1,9 @@
-import { normalize, missingContent, toIso } from '../normalizer.js';
+import { normalize, missingContent } from '../normalizer.js';
 import { atsErrorFromStatus } from '../errors.js';
 import { prefilterRows } from '../filters.js';
 import { atsFetch } from '../http.js';
 import { orgHost } from '../boards.js';
+import { awarePublicationInstant } from '../publication.js';
 
 const MAX_DETAIL_FETCHES = 100;
 const LIST_PAGE_SIZE = 20;
@@ -52,6 +53,7 @@ export async function fetchWorkday(slug, ctx = {}) {
   let pages = 0;
   let firstTotal = 0;
   let listCapped = false;
+  const seenPaths = new Set();
   while (true) {
     if (pages >= LIST_PAGE_HARD_CAP) {
       listCapped = true;
@@ -68,6 +70,7 @@ export async function fetchWorkday(slug, ctx = {}) {
       // A 429 or 5xx that outlasted the retries, or a network failure.
       // After the first page, keep the postings already read.
       if (offset === 0) throw err;
+      listCapped = true;
       break;
     }
 
@@ -76,6 +79,7 @@ export async function fetchWorkday(slug, ctx = {}) {
         if (resp.status === 404) return []; // wrong site / no such board
         throw atsErrorFromStatus(resp.status, `Workday API error for ${slug} (${tenant}/${env}/${site}): ${resp.status}`);
       }
+      listCapped = true;
       break; // mid-paging failure (any status): keep what we have
     }
 
@@ -84,10 +88,25 @@ export async function fetchWorkday(slug, ctx = {}) {
     // Some tenants report the real `total` only at offset 0 and send
     // `total: 0` on every later page, so only the first page's figure
     // is trusted. A short page is the other stop signal.
-    if (pages === 0) firstTotal = data.total || 0;
-    postings.push(...page);
+    if (pages === 0) firstTotal = Number.isFinite(data.total) && data.total > 0 ? data.total : 0;
+    const fresh = page.filter(p => {
+      if (!p.externalPath || seenPaths.has(p.externalPath)) return false;
+      seenPaths.add(p.externalPath);
+      return true;
+    });
+    postings.push(...fresh);
     pages += 1;
     offset += LIST_PAGE_SIZE;
+    // A stale offset can restart page zero instead of returning an empty page.
+    // Stop the loop, preserve unique postings, and expose incomplete coverage.
+    if (page.length > 0 && fresh.length === 0) {
+      listCapped = true;
+      break;
+    }
+    if (fresh.length < page.length) listCapped = true;
+    // A short page below the initial total can also mean a moving list or a
+    // partial response. It ends this pass, but must not certify completeness.
+    if (page.length < LIST_PAGE_SIZE && firstTotal > postings.length) listCapped = true;
     if (page.length < LIST_PAGE_SIZE) break;
     if (firstTotal > 0 && offset >= firstTotal) break;
   }
@@ -151,8 +170,8 @@ export async function fetchWorkday(slug, ctx = {}) {
       workplace: parseWorkdayRemoteType(info.remoteType),
       description: info.jobDescription || '',
       url: `https://${tenant}.${env}.myworkdayjobs.com/${site}${externalPath}`,
-      // startDate is "2026-05-01" or "May 1, 2026".
-      postedAt: toIso(info.startDate) || normalizePostedOn(p.postedOn),
+      // A calendar day or "Posted Today" cannot certify an original instant.
+      postedAt: awarePublicationInstant(info.startDate),
       salary: null, // normalizer extracts from description text
       content,
       metadata: {
@@ -160,6 +179,10 @@ export async function fetchWorkday(slug, ctx = {}) {
         workdayEnv: env,
         workdaySite: site,
         externalPath,
+        publicationDateRaw: info.startDate || null,
+        postedOnRaw: p.postedOn || null,
+        publicationDateBasis: awarePublicationInstant(info.startDate)
+          ? 'source_startDate_aware' : 'calendar_or_relative_unverified',
       },
     }, 'workday');
   }));
@@ -217,17 +240,6 @@ function daysAgo(postedOn) {
 function withinDays(postedOn, days) {
   const n = daysAgo(postedOn);
   return n === null || n <= days;
-}
-
-/**
- * Coerce a Workday list `postedOn` (relative) into an approx ISO date
- * so the library's postedWithinDays re-filter has a value to compare.
- */
-function normalizePostedOn(v) {
-  const direct = toIso(v);
-  if (direct) return direct;
-  const n = daysAgo(v);
-  return n === null ? null : new Date(Date.now() - n * 86400000).toISOString();
 }
 
 /**

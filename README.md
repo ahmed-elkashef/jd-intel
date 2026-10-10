@@ -1,5 +1,11 @@
 # jd-intel
 
+## Source safety fork
+
+This is a public MIT fork of [Prashant R’s jd-intel](https://github.com/prPMDev/jd-intel), based on upstream commit `c37a6edeb1140d2418e07928dedd6537bc4bf12d`. Original authorship and license are preserved. See [FORK.md](FORK.md) for the changes, limits and local MCP setup.
+
+Install this fork from its checkout. The upstream npm packages and upstream MCPB links in the documentation below do not include this fork’s changes. This fork has no separate npm or MCP Registry publication.
+
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/jd-intel.svg)](https://www.npmjs.com/package/jd-intel)

@@ -57,6 +57,9 @@ export function filterJobs(jobs, options = {}) {
   if (typeof postedWithinDays === 'number') {
     const cutoff = Date.now() - postedWithinDays * 86400000;
     result = result.filter(j => {
+      // Some adapters explicitly preserve an unresolved original date. An
+      // edit timestamp or timezone-free calendar day cannot prove a date miss.
+      if (['original_unavailable', 'calendar_or_relative_unverified'].includes(j.metadata?.publicationDateBasis)) return true;
       if (!j.postedAt) return false;
       const posted = new Date(j.postedAt).getTime();
       return Number.isFinite(posted) && posted >= cutoff;

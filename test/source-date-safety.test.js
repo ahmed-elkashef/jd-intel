@@ -4,6 +4,7 @@ import { fetchWorkday } from '../src/adapters/workday.js';
 import { fetchGreenhouse } from '../src/adapters/greenhouse.js';
 import { fetchLever } from '../src/adapters/lever.js';
 import { fetchPersonio } from '../src/adapters/personio.js';
+import { fetchJobsDetailed } from '../src/index.js';
 import { filterJobs } from '../src/filters.js';
 import { awarePublicationInstant } from '../src/publication.js';
 import { disableRetries } from './helpers.js';
@@ -60,6 +61,109 @@ test('a partial page failure preserves read rows but cannot certify complete cov
   const jobs = await fetchWorkday('companyx', { ...CTX, report: (r) => { report = r; } });
   assert.equal(jobs.length, 20);
   assert.equal(report.capped, true);
+});
+
+test('unfiltered Workday board pages pass row 100 with bounded details, stable offsets and exact list counts', async (t) => {
+  let detailCalls = [];
+  t.mock.method(global, 'fetch', async (url, opts) => {
+    if (!url.endsWith('/jobs')) {
+      detailCalls.push(url);
+      return response(detail());
+    }
+    const { offset } = JSON.parse(opts.body);
+    return response({ total: offset === 0 ? 250 : 0,
+      jobPostings: Array.from({ length: Math.min(20, 250 - offset) }, (_, i) => row(offset + i)) });
+  });
+  const all = [];
+  for (const offset of [0, 100, 200]) {
+    detailCalls = [];
+    const result = await fetchJobsDetailed({ company: 'companyx', ats: 'workday', config: CTX.config,
+      order: 'board', offset, limit: 100 });
+    const count = Math.min(100, 250 - offset);
+    assert.equal(result.jobs.length, count);
+    assert.equal(detailCalls.length, count);
+    assert.deepEqual(result.jobs.map(j => j.title), Array.from({ length: count }, (_, i) => `Position ${offset + i}`));
+    assert.ok(result.jobs.every(j => j.content.status === 'complete'));
+    assert.equal(result.total_matched, 250);
+    assert.equal(result.total_before_filters, 250);
+    assert.equal(result.pagination.counts_exact, true);
+    assert.equal(result.pagination.next_offset, offset + count < 250 ? offset + count : null);
+    assert.equal(result.pagination.snapshot_stable, false);
+    all.push(...result.jobs);
+  }
+  assert.equal(new Set(all.map(j => j.metadata.externalPath)).size, 250);
+});
+
+test('Workday limits one inventory page to 100 details even when caller asks for 500', async (t) => {
+  let details = 0;
+  t.mock.method(global, 'fetch', async (url, opts) => {
+    if (!url.endsWith('/jobs')) { details += 1; return response(detail()); }
+    const { offset } = JSON.parse(opts.body);
+    return response({ total: 120, jobPostings: Array.from({ length: Math.min(20, 120 - offset) }, (_, i) => row(offset + i)) });
+  });
+  const result = await fetchJobsDetailed({ company: 'companyx', ats: 'workday', config: CTX.config, order: 'board', limit: 500 });
+  assert.equal(result.jobs.length, 100);
+  assert.equal(details, 100);
+  assert.equal(result.pagination.next_offset, 100);
+  assert.equal(result.pagination.detail_limit, 100);
+});
+
+test('filtered Workday offsets retain match semantics and stay explicitly capped', async (t) => {
+  t.mock.method(global, 'fetch', async (url, opts) => {
+    if (!url.endsWith('/jobs')) return response(detail());
+    const { offset } = JSON.parse(opts.body);
+    return response({ total: 120, jobPostings: Array.from({ length: Math.min(20, 120 - offset) }, (_, i) => row(offset + i)) });
+  });
+  const result = await fetchJobsDetailed({ company: 'companyx', ats: 'workday', config: CTX.config,
+    order: 'board', offset: 4, limit: 3, titleFilter: 'Position (?:[02468]|1[02468])$' });
+  assert.deepEqual(result.jobs.map(j => j.title), ['Position 8', 'Position 10', 'Position 12']);
+  assert.equal(result.pagination, undefined);
+});
+
+test('a partial Workday list page cannot make inventory counts exact', async (t) => {
+  t.mock.method(global, 'fetch', async (url, opts) => {
+    if (!url.endsWith('/jobs')) return response(detail());
+    const { offset } = JSON.parse(opts.body);
+    if (offset === 20) return { ok: false, status: 403 };
+    return response({ total: 120, jobPostings: Array.from({ length: 20 }, (_, i) => row(i)) });
+  });
+  const result = await fetchJobsDetailed({ company: 'companyx', ats: 'workday', config: CTX.config, order: 'board' });
+  assert.equal(result.jobs.length, 20);
+  assert.equal(result.pagination.counts_exact, false);
+  assert.equal(result.pagination.list_coverage, 'incomplete');
+  assert.equal(result.boards[0].scan.capped, true);
+});
+
+test('a malformed Workday list cannot be certified as exact zero supply', async (t) => {
+  t.mock.method(global, 'fetch', async () => response({ total: 120, error: 'temporarily unavailable' }));
+  await assert.rejects(fetchJobsDetailed({ company: 'companyx', ats: 'workday', config: CTX.config, order: 'board' }),
+    /Malformed Workday list response/);
+});
+
+test('a malformed later Workday list preserves its prefix with incomplete coverage', async (t) => {
+  t.mock.method(global, 'fetch', async (url, opts) => {
+    if (!url.endsWith('/jobs')) return response(detail());
+    const { offset } = JSON.parse(opts.body);
+    return response(offset === 0
+      ? { total: 120, jobPostings: Array.from({ length: 20 }, (_, i) => row(i)) }
+      : { total: 120 });
+  });
+  const result = await fetchJobsDetailed({ company: 'companyx', ats: 'workday', config: CTX.config, order: 'board' });
+  assert.equal(result.jobs.length, 20);
+  assert.equal(result.pagination.counts_exact, false);
+});
+
+test('successful Workday detail responses with no body remain missing content without losing the row', async (t) => {
+  for (const body of [{}, { jobPostingInfo: {} }, { jobPostingInfo: { jobDescription: {} } }, { jobPostingInfo: { jobDescription: ' ' } },
+    { jobPostingInfo: { jobDescription: '<p><br></p>' } }]) {
+    t.mock.method(global, 'fetch', async (url) => response(url.endsWith('/jobs')
+      ? { total: 1, jobPostings: [row(1)] } : body));
+    const result = await fetchJobsDetailed({ company: 'companyx', ats: 'workday', config: CTX.config, order: 'board' });
+    assert.equal(result.jobs.length, 1);
+    assert.deepEqual(result.jobs[0].content, { status: 'missing', reason: 'source_empty_description' });
+    assert.equal(result.content_missing, 1);
+    assert.equal(result.pagination.counts_exact, true);
+  }
 });
 
 test('a short page below the initial total and a mixed duplicate page are partial', async (t) => {

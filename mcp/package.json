@@ -1,6 +1,6 @@
 {
   "name": "jd-intel-mcp",
-  "version": "0.13.1-source-safety",
+  "version": "0.13.2-source-safety",
   "mcpName": "io.github.ahmed-elkashef/jd-intel-mcp",
   "description": "MCP server for jd-intel. Your AI assistant fetches and reads full job descriptions across nine ATS platforms, no copy-paste.",
   "type": "module",

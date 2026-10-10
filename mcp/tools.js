@@ -227,9 +227,9 @@ export function registerTools(server, deps = {}) {
         );
       }
 
-      // Workday and SmartRecruiters read at most their cap. With a capped
-      // scan every count is a floor and not_returned cannot be stated.
-      const countsExact = !boards.some((b) => b.scan?.capped === true);
+      // An unfiltered Workday page can prove its list total without reading
+      // every description. Other capped scans expose only count floors.
+      const countsExact = result.pagination?.counts_exact ?? !boards.some((b) => b.scan?.capped === true);
       const meta = {
         count: 0,
         registry_hit: match === 'registry',
@@ -249,6 +249,7 @@ export function registerTools(server, deps = {}) {
         offset,
         next_offset: null,
         order,
+        ...(result.pagination ? { source_pagination: result.pagination } : {}),
       };
 
       const jobs = fitToBudget(page, maxTokens, meta, total_matched);
@@ -258,21 +259,21 @@ export function registerTools(server, deps = {}) {
       else if (notReturned > 0) truncated = { reason: 'limit', not_returned: countsExact ? notReturned : null };
       else if (!countsExact) truncated = { reason: 'scan_cap', not_returned: null };
 
-      // A capped adapter hydrates only the rows the page needs (offset +
-      // limit), so on a capped board total_matched equals offset + count
-      // whenever the page fills and "matches remain" never fires while
-      // most of the board is unread. A filled page on a capped board
-      // therefore pages on; the page it names is empty once the cap itself
-      // is the bound.
-      const pagesOn = notReturned > 0 || (!countsExact && jobs.length === limit);
+      // Legacy prefix scans can page on while their count remains a floor.
+      // Workday inventory windows instead page only through captured native
+      // rows, and token-budget cuts advance by emitted rows, not hydrated ones.
+      const pagesOn = jobs.length > 0 && (notReturned > 0 ||
+        (!result.pagination && !countsExact && jobs.length === limit));
 
       // partial: a usable answer where something was not checked, either a
       // board (failed) or a posting (content_missing, issue #85).
+      const deliveredNextOffset = pagesOn ? offset + jobs.length : null;
       return withEstTokens(failed.length > 0 || content_missing > 0 ? partial : success, jobs, {
         ...meta,
         count: jobs.length,
         truncated,
-        next_offset: pagesOn ? offset + jobs.length : null,
+        next_offset: deliveredNextOffset,
+        ...(result.pagination ? { source_pagination: { ...result.pagination, next_offset: deliveredNextOffset } } : {}),
       });
     })
   );

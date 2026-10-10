@@ -1,4 +1,4 @@
-import { normalize, missingContent } from '../normalizer.js';
+import { normalize, missingContent, stripHtml } from '../normalizer.js';
 import { atsErrorFromStatus } from '../errors.js';
 import { prefilterRows } from '../filters.js';
 import { atsFetch } from '../http.js';
@@ -83,8 +83,16 @@ export async function fetchWorkday(slug, ctx = {}) {
       break; // mid-paging failure (any status): keep what we have
     }
 
-    const data = await resp.json();
-    const page = data.jobPostings || [];
+    let data;
+    try {
+      data = await resp.json();
+      if (!data || !Array.isArray(data.jobPostings)) throw new Error('missing jobPostings array');
+    } catch (err) {
+      if (offset === 0) throw atsErrorFromStatus(502, `Malformed Workday list response for ${slug}: ${err.message}`);
+      listCapped = true;
+      break;
+    }
+    const page = data.jobPostings;
     // Some tenants report the real `total` only at offset 0 and send
     // `total: 0` on every later page, so only the first page's figure
     // is trusted. A short page is the other stop signal.
@@ -118,12 +126,18 @@ export async function fetchWorkday(slug, ctx = {}) {
   //    where: the row stays a candidate through both location filters and
   //    the library's pass after hydration decides on the detail's location
   //    list (issue #61).
-  //    NOTE: huge-tenant coverage is intentionally capped for v1. Two caps
-  //    apply: the list scan above stops at LIST_PAGE_HARD_CAP pages (2000
-  //    postings, enough for Salesforce's ~1398), and the detail set is cut
-  //    to MAX_DETAIL_FETCHES here. Proper fix (smart pagination, surfaced
-  //    truncation) is tracked in #26.
-  const { candidates, hydrate } = prefilterRows(postings, fc, {
+  //    The native list scan has a 2000-row budget; a capped list is incomplete.
+  //    A separate 100-detail budget limits each call's full-description work.
+  // Board-order inventory pages can select their own slice before details.
+  // Sorted or filtered match offsets need unseen detail fields, so those
+  // retain the prefix scan and its explicit incomplete-coverage signal.
+  const inventoryPage = fc.order === 'board' && !fc.titleFilter && !fc.filter &&
+    typeof fc.postedWithinDays !== 'number' &&
+    !(Array.isArray(fc.locationIncludes) && fc.locationIncludes.length) &&
+    !(Array.isArray(fc.locationExcludes) && fc.locationExcludes.length);
+  const pageOffset = typeof fc.offset === 'number' && fc.offset > 0 ? fc.offset : 0;
+  const pageLimit = Math.min(typeof fc.limit === 'number' && fc.limit > 0 ? fc.limit : 100, MAX_DETAIL_FETCHES);
+  const selection = prefilterRows(postings, fc, {
     title: p => p.title || '',
     location: p => {
       const loc = (p.locationsText || '').toLowerCase();
@@ -132,6 +146,8 @@ export async function fetchWorkday(slug, ctx = {}) {
     postedWithin: (p, days) => withinDays(p.postedOn, days),
     max: MAX_DETAIL_FETCHES,
   });
+  const candidates = selection.candidates;
+  const hydrate = inventoryPage ? candidates.slice(pageOffset, pageOffset + pageLimit) : selection.hydrate;
 
   // 4. Hydrate descriptions via the per-posting detail endpoint. The detail
   //    also carries `hiringOrganization: { name, url }` next to
@@ -151,6 +167,10 @@ export async function fetchWorkday(slug, ctx = {}) {
       if (dResp.ok) {
         const detail = await dResp.json();
         info = detail.jobPostingInfo || {};
+        if (typeof info.jobDescription !== 'string' || !stripHtml(info.jobDescription)) {
+          info = { ...info, jobDescription: '' };
+          content = { status: 'missing', reason: 'source_empty_description' };
+        }
         orgs[i] = detail.hiringOrganization || null;
       } else {
         content = missingContent(dResp);
@@ -198,6 +218,16 @@ export async function fetchWorkday(slug, ctx = {}) {
       capped: listCapped || hydrate.length < candidates.length,
       org_name: org.name || null,
       org_url: orgHost(org.url),
+      ...(inventoryPage ? { pagination: {
+        basis: 'unfiltered_board_order',
+        offset: pageOffset,
+        detail_limit: pageLimit,
+        total: postings.length,
+        counts_exact: !listCapped,
+        next_offset: pageOffset + jobs.length < postings.length ? pageOffset + jobs.length : null,
+        list_coverage: listCapped ? 'incomplete' : 'complete_current_list',
+        snapshot_stable: false,
+      } } : {}),
     });
   }
 

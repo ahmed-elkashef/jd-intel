@@ -2,6 +2,7 @@ import { normalize, toIso } from '../normalizer.js';
 import { atsErrorFromStatus } from '../errors.js';
 import { atsFetch, probeResult } from '../http.js';
 import { orgHost } from '../boards.js';
+import { awarePublicationInstant } from '../publication.js';
 
 /**
  * Fetch jobs from a Recruitee career site.
@@ -52,6 +53,8 @@ export async function fetchRecruitee(slug, ctx = {}) {
     if (offer.remote) location = place ? `Remote - ${place}` : 'Remote';
 
     const createdAt = recruiteeDate(offer.created_at);
+    const publishedAt = awarePublicationInstant(typeof offer.published_at === 'string'
+      ? offer.published_at.replace(' UTC', 'Z').replace(' ', 'T') : null);
 
     return normalize({
       companySlug: slug,
@@ -65,13 +68,16 @@ export async function fetchRecruitee(slug, ctx = {}) {
       url: offer.careers_url || offer.careers_apply_url || '',
       // created_at can predate publication by years on long-lived offers,
       // so it is not a posting date. published_at is.
-      postedAt: recruiteeDate(offer.published_at) || createdAt,
+      postedAt: publishedAt,
       salary: parseRecruiteeSalary(offer.salary),
       metadata: {
         recruiteeId: offer.guid || offer.id,
         employmentType: offer.employment_type_code || '',
         category: offer.category_code || '',
         createdAt,
+        createdAtRaw: offer.created_at || null,
+        publishedAtRaw: offer.published_at || null,
+        publicationDateBasis: publishedAt ? 'source_published_at' : 'original_unavailable',
       },
     }, 'recruitee');
   });

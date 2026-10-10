@@ -172,11 +172,25 @@ describe('fetchRecruitee', () => {
     assert.notEqual(job.postedAt, job.metadata.createdAt);
   });
 
-  test('postedAt falls back to created_at when published_at is missing', async (t) => {
+  test('missing original publication remains unknown even with an old creation time', async (t) => {
     for (const published_at of ['', null, undefined]) {
       mockFetch(t, { body: withOffer({ published_at }) });
       const [job] = await fetchRecruitee('channable');
-      assert.equal(job.postedAt, '2026-03-31T06:40:22.000Z');
+      assert.equal(job.postedAt, null);
+      assert.equal(job.metadata.createdAt, '2026-03-31T06:40:22.000Z');
+      assert.equal(job.metadata.createdAtRaw, '2026-03-31 06:40:22 UTC');
+      assert.equal(job.metadata.publicationDateBasis, 'original_unavailable');
+      assert.equal(applyFilters([job], { postedWithinDays: 7 }).length, 1);
+    }
+  });
+
+  test('naive and invalid publication dates retain raw evidence without an invented instant', async (t) => {
+    for (const published_at of ['2026-07-28', '2026-07-28 07:21:13', '2026-02-30 07:21:13 UTC']) {
+      mockFetch(t, { body: withOffer({ published_at }) });
+      const [job] = await fetchRecruitee('channable');
+      assert.equal(job.postedAt, null);
+      assert.equal(job.metadata.publishedAtRaw, published_at);
+      assert.equal(job.metadata.publicationDateBasis, 'original_unavailable');
     }
   });
 

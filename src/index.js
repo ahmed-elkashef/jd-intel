@@ -144,7 +144,7 @@ export async function fetchJobsDetailed({
     ADAPTERS[t.ats].fetch(t.slug, {
       config: t.config,
       companyName: t.name ?? undefined,
-      filterContext: { ...filters, offset, limit },
+      filterContext: { ...filters, order, offset, limit },
       report: (fields) => {
         reports[t.ats] = { ...reports[t.ats], ...fields };
       },
@@ -194,15 +194,20 @@ export async function fetchJobsDetailed({
   }
   for (const board of boards) board.matched = perBoard.get(`${board.ats}|${board.slug}`) || 0;
 
+  const inventoryPagination = targets.length === 1 && targets[0].ats === 'workday'
+    ? reports.workday?.pagination : null;
+  if (inventoryPagination) boards[0].matched = inventoryPagination.total;
+
   return {
-    jobs: pageJobs(matched, { order, offset, limit }),
-    total_matched: matched.length,
+    jobs: pageJobs(matched, { order, offset: inventoryPagination ? 0 : offset, limit }),
+    total_matched: inventoryPagination ? inventoryPagination.total : matched.length,
     total_before_filters: boards.reduce((n, b) => n + b.jobs_found, 0),
     content_missing: rows.filter(j => j.content?.status === 'missing').length,
     match,
     company: match === 'registry' ? { key: normSlug(targets[0].name), name: targets[0].name } : null,
     boards,
     failed,
+    ...(inventoryPagination ? { pagination: inventoryPagination } : {}),
   };
 }
 

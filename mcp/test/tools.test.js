@@ -115,6 +115,68 @@ const cappedBoard = (matched) => board({
   jobs_found: 500, matched, scan: { listed: 500, prefiltered: 500, hydrated: 100, capped: true },
 });
 
+test('real Workday MCP board paging crosses 100 with complete descriptions and consistent continuation', async (t) => {
+  noRetries(t);
+  let details = 0;
+  t.mock.method(global, 'fetch', async (url, opts) => {
+    if (url.endsWith('/jobs')) {
+      const { offset } = JSON.parse(opts.body);
+      return okResponse({ total: offset === 0 ? 205 : 0,
+        jobPostings: Array.from({ length: Math.min(20, 205 - offset) }, (_, i) => ({
+          title: `Position ${offset + i}`, externalPath: `/job/Region/Position_${offset + i}`, locationsText: 'Remote', postedOn: 'Posted Today',
+        })) });
+    }
+    details += 1;
+    return okResponse({ jobPostingInfo: { jobDescription: '<p>Complete requirements and delivery scope.</p>', startDate: '2026-10-07' } });
+  });
+  const client = await connect({});
+  t.after(() => client.close());
+  const names = [];
+  let offset = 0;
+  do {
+    details = 0;
+    const env = (await fetchOk(client, { company: 'companyx', workday: { tenant: 'companyx', env: 'wd1', site: 'careers' },
+      order: 'board', offset, limit: 100, max_tokens: 100000 })).structuredContent;
+    assert.equal(env.metadata.total_matched, 205);
+    assert.equal(env.metadata.counts_exact, true);
+    assert.equal(env.metadata.source_pagination.next_offset, env.metadata.next_offset);
+    assert.ok(details <= 100);
+    assert.ok(env.data.every(j => j.content.status === 'complete'));
+    names.push(...env.data.map(j => j.title));
+    offset = env.metadata.next_offset;
+  } while (offset !== null);
+  assert.deepEqual(names, Array.from({ length: 205 }, (_, i) => `Position ${i}`));
+});
+
+test('Workday source continuation follows emitted rows when a token budget cuts its hydrated page', async (t) => {
+  const jobs = Array.from({ length: 5 }, (_, i) => boardJob(i, 'x'.repeat(10000)));
+  const result = { ...libraryResult({ jobs, total_matched: 120, boards: [cappedBoard(120)] }), pagination: {
+    basis: 'unfiltered_board_order', offset: 0, detail_limit: 5, total: 120,
+    counts_exact: true, next_offset: 5, list_coverage: 'complete_current_list', snapshot_stable: false,
+  } };
+  const client = await connect({ fetchJobsDetailed: returning(result) });
+  t.after(() => client.close());
+  const env = (await fetchOk(client, { company: 'acme', order: 'board', limit: 5, max_tokens: 100 })).structuredContent;
+  assert.equal(env.data.length, 1);
+  assert.equal(env.metadata.next_offset, 1);
+  assert.equal(env.metadata.source_pagination.next_offset, 1);
+});
+
+test('Workday MCP successful empty detail is partial with a retained row and missing-content evidence', async (t) => {
+  noRetries(t);
+  t.mock.method(global, 'fetch', async (url) => okResponse(url.endsWith('/jobs')
+    ? { total: 1, jobPostings: [{ title: 'Position', externalPath: '/job/Region/Position_1', locationsText: 'Remote' }] }
+    : {}));
+  const client = await connect({});
+  t.after(() => client.close());
+  const env = (await fetchOk(client, { company: 'companyx', workday: { tenant: 'companyx', env: 'wd1', site: 'careers' }, order: 'board' })).structuredContent;
+  assert.equal(env.status, 'partial');
+  assert.equal(env.data.length, 1);
+  assert.equal(env.metadata.content_missing, 1);
+  assert.deepEqual(env.data[0].content, { status: 'missing', reason: 'source_empty_description' });
+  assert.equal(env.metadata.next_offset, null);
+});
+
 async function fetchOk(client, args) {
   const result = await call(client, 'fetch_jobs', args);
   assert.equal(result.isError, undefined, result.content?.[0]?.text);
@@ -1105,6 +1167,10 @@ describe('contract: each description names exactly the metadata keys, statuses a
     const down = failure('ashby', 'ats_unreachable', '503');
     const scenarios = [
       { deps: { fetchJobsDetailed: returning(libraryResult({ jobs: [job] })) }, args: { company: 'acme' } },
+      { deps: { fetchJobsDetailed: returning({ ...libraryResult({ jobs: [job] }), pagination: {
+        basis: 'unfiltered_board_order', offset: 0, detail_limit: 1, total: 1, counts_exact: true,
+        next_offset: null, list_coverage: 'complete_current_list', snapshot_stable: false,
+      } }) }, args: { company: 'acme', order: 'board' } },
       { deps: { fetchJobsDetailed: returning(libraryResult({ jobs: [job], match: 'probe', failed: [limited] })) }, args: { company: 'acme' } },
       { deps: { fetchJobsDetailed: returning(libraryResult({ match: 'probe', boards: [], failed: [limited, down] })) }, args: { company: 'acme' } },
       { deps: { fetchJobsDetailed: returning(libraryResult({ match: 'probe', boards: [], failed: [down] })) }, args: { company: 'acme' } },
